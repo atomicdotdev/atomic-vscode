@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { AtomicClient, shouldRefreshForPath } from "./client";
+import { AtomicClient, shouldRefreshForPath, validateRemoteName } from "./client";
 import { AtomicFileStatus, StatusDocument, StatusEntry } from "./protocol";
 
 export const PRISTINE_SCHEME = "atomic-pristine";
@@ -169,6 +169,75 @@ export class AtomicRepository implements vscode.Disposable, vscode.QuickDiffProv
     } catch (error) {
       this.showOperationError("list views", error);
     }
+  }
+
+  async pull(): Promise<void> {
+    let status: StatusDocument;
+    try {
+      status = await this.client.status();
+    } catch (error) {
+      this.showOperationError("check status before pull", error);
+      return;
+    }
+
+    if (!status.clean) {
+      const choice = await vscode.window.showWarningMessage(
+        "Pull may update files that also have unrecorded local changes.",
+        { modal: true },
+        "Pull",
+      );
+      if (choice !== "Pull") {
+        return;
+      }
+    }
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Atomic: Pulling changes",
+        cancellable: false,
+      },
+      () => this.runOperation("pull", () => this.client.pull()),
+    );
+  }
+
+  async push(): Promise<void> {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Atomic: Pushing changes",
+        cancellable: false,
+      },
+      () => this.runOperation("push", () => this.client.push()),
+    );
+  }
+
+  async addDefaultRemote(): Promise<void> {
+    const name = await vscode.window.showInputBox({
+      title: "Add Atomic Remote",
+      prompt: "Remote name",
+      value: "origin",
+      ignoreFocusOut: true,
+      validateInput: validateRemoteName,
+    });
+    if (!name) {
+      return;
+    }
+
+    const url = await vscode.window.showInputBox({
+      title: "Add Atomic Remote",
+      prompt: "Remote repository URL",
+      placeHolder: "https://example.com/workspaces/acme/projects/project/code",
+      ignoreFocusOut: true,
+      validateInput: (value) => (value.trim() ? undefined : "Enter a remote repository URL"),
+    });
+    if (!url) {
+      return;
+    }
+
+    await this.runOperation("add remote", () =>
+      this.client.addDefaultRemote(name.trim(), url.trim()),
+    );
   }
 
   async openChange(entry: StatusEntry): Promise<void> {

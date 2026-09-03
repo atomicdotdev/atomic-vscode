@@ -7,9 +7,14 @@ import {
   assertNoSymlinkComponents,
   AtomicClient,
   AtomicCommandError,
+  cloneRepository,
   CommandRunner,
+  inferCloneFolderName,
+  initializeRepository,
   isAtomicMetadataPath,
   shouldRefreshForPath,
+  validateCloneFolderName,
+  validateRemoteName,
 } from "../src/client";
 
 test("Atomic metadata changes do not trigger recursive status refreshes", () => {
@@ -117,6 +122,94 @@ test("AtomicClient protects record messages and view names that start with a das
   assert.deepEqual(calls, [
     ["--no-color", "record", "--message=-message"],
     ["--no-color", "view", "switch", "--", "-view"],
+  ]);
+});
+
+test("repository setup commands pass URLs and paths without shell interpolation", async () => {
+  const calls: Array<{ executable: string; args: readonly string[]; cwd: string }> = [];
+  const runner: CommandRunner = async (executable, args, cwd) => {
+    calls.push({ executable, args, cwd });
+    return Buffer.alloc(0);
+  };
+
+  await initializeRepository("/bin/atomic", "/work/new repo", runner);
+  await cloneRepository(
+    "/bin/atomic",
+    "https://example.com/workspaces/acme/projects/demo/code?token=a&b=c",
+    "/work/cloned repo",
+    runner,
+  );
+
+  assert.deepEqual(calls, [
+    {
+      executable: "/bin/atomic",
+      args: ["--no-color", "init", "--", "/work/new repo"],
+      cwd: "/work",
+    },
+    {
+      executable: "/bin/atomic",
+      args: [
+        "--no-color",
+        "clone",
+        "--",
+        "https://example.com/workspaces/acme/projects/demo/code?token=a&b=c",
+        "/work/cloned repo",
+      ],
+      cwd: "/work",
+    },
+  ]);
+});
+
+test("clone destination helpers handle Atomic URLs and unsafe folder names", () => {
+  assert.equal(
+    inferCloneFolderName("https://example.com/workspaces/acme/projects/demo/code"),
+    "demo",
+  );
+  assert.equal(inferCloneFolderName("https://example.com/acme/project.git/"), "project");
+  assert.equal(inferCloneFolderName("project"), "project");
+
+  assert.equal(validateCloneFolderName("project"), undefined);
+  assert.match(validateCloneFolderName("../outside") ?? "", /single valid folder/);
+  assert.match(validateCloneFolderName("folder/name") ?? "", /single valid folder/);
+  assert.match(validateCloneFolderName("CON.txt") ?? "", /single valid folder/);
+  assert.match(validateCloneFolderName("project.") ?? "", /single valid folder/);
+  assert.match(validateCloneFolderName("project\u0007") ?? "", /single valid folder/);
+  assert.match(validateCloneFolderName("   ") ?? "", /folder name/);
+});
+
+test("remote names use the same validation rules as the Atomic CLI", () => {
+  assert.equal(validateRemoteName("origin"), undefined);
+  assert.equal(validateRemoteName("team-upstream_2"), undefined);
+  assert.match(validateRemoteName("-origin") ?? "", /do not start/);
+  assert.match(validateRemoteName("origin/team") ?? "", /letters, numbers/);
+  assert.match(validateRemoteName("..") ?? "", /letters, numbers/);
+  assert.match(validateRemoteName("   ") ?? "", /remote name/);
+});
+
+test("AtomicClient invokes pull and push through the repository command queue", async () => {
+  const calls: string[][] = [];
+  const runner: CommandRunner = async (_executable, args) => {
+    calls.push([...args]);
+    return Buffer.alloc(0);
+  };
+  const client = new AtomicClient("/repo", "atomic", runner);
+
+  await client.pull();
+  await client.push();
+  await client.addDefaultRemote("-origin", "https://example.com/project?token=a&b=c");
+
+  assert.deepEqual(calls, [
+    ["--no-color", "pull"],
+    ["--no-color", "push"],
+    [
+      "--no-color",
+      "remote",
+      "add",
+      "--default",
+      "--",
+      "-origin",
+      "https://example.com/project?token=a&b=c",
+    ],
   ]);
 });
 

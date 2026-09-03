@@ -11,6 +11,49 @@ import {
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
+export function inferCloneFolderName(remote: string): string {
+  const trimmed = remote.trim().replace(/\/+$/, "");
+  let segments: string[] = [];
+  try {
+    segments = new URL(trimmed).pathname.split("/").filter(Boolean);
+  } catch {
+    segments = trimmed.split("/").filter(Boolean);
+  }
+
+  const last = segments.at(-1);
+  const candidate = last === "code" ? segments.at(-2) : last;
+  return candidate?.replace(/\.git$/, "") || "repo";
+}
+
+export function validateCloneFolderName(value: string): string | undefined {
+  const name = value.trim();
+  if (!name) {
+    return "Enter a folder name";
+  }
+  const windowsReservedName = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+  if (
+    name === "." ||
+    name === ".." ||
+    /[\x00-\x1f<>:"/\\|?*]/.test(name) ||
+    /[. ]$/.test(name) ||
+    windowsReservedName.test(name)
+  ) {
+    return "Enter a single valid folder name";
+  }
+  return undefined;
+}
+
+export function validateRemoteName(value: string): string | undefined {
+  const name = value.trim();
+  if (!name) {
+    return "Enter a remote name";
+  }
+  if (name === "." || name === ".." || name.startsWith("-") || !/^[A-Za-z0-9_-]+$/.test(name)) {
+    return "Use letters, numbers, hyphens, or underscores; do not start with a hyphen";
+  }
+  return undefined;
+}
+
 export function isAtomicMetadataPath(relativePath: string): boolean {
   return relativePath === ".atomic" || relativePath.startsWith(".atomic/");
 }
@@ -43,6 +86,23 @@ export type CommandRunner = (
   args: readonly string[],
   cwd: string,
 ) => Promise<Buffer>;
+
+export async function initializeRepository(
+  executable: string,
+  target: string,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  await runner(executable, ["--no-color", "init", "--", target], path.dirname(target));
+}
+
+export async function cloneRepository(
+  executable: string,
+  url: string,
+  target: string,
+  runner: CommandRunner = runCommand,
+): Promise<void> {
+  await runner(executable, ["--no-color", "clone", "--", url, target], path.dirname(target));
+}
 
 export class AtomicCommandError extends Error {
   constructor(
@@ -100,6 +160,18 @@ export class AtomicClient {
 
   async switchView(name: string): Promise<void> {
     await this.run(["view", "switch", "--", name]);
+  }
+
+  async pull(): Promise<void> {
+    await this.run(["pull"]);
+  }
+
+  async push(): Promise<void> {
+    await this.run(["push"]);
+  }
+
+  async addDefaultRemote(name: string, url: string): Promise<void> {
+    await this.run(["remote", "add", "--default", "--", name, url]);
   }
 
   async original(relativePath: string): Promise<Buffer> {

@@ -35,6 +35,18 @@
   "contributes": {
     "commands": [
       {
+        "command": "atomic.init",
+        "title": "Initialize Repository",
+        "category": "Atomic",
+        "icon": "$(repo-create)"
+      },
+      {
+        "command": "atomic.clone",
+        "title": "Clone Repository",
+        "category": "Atomic",
+        "icon": "$(repo-clone)"
+      },
+      {
         "command": "atomic.refresh",
         "title": "Refresh",
         "category": "Atomic",
@@ -63,6 +75,24 @@
         "icon": "$(git-branch)"
       },
       {
+        "command": "atomic.pull",
+        "title": "Pull",
+        "category": "Atomic",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "atomic.push",
+        "title": "Push",
+        "category": "Atomic",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "atomic.addRemote",
+        "title": "Add Default Remote",
+        "category": "Atomic",
+        "icon": "$(remote)"
+      },
+      {
         "command": "atomic.openChange",
         "title": "Open Change",
         "category": "Atomic"
@@ -71,13 +101,28 @@
     "menus": {
       "scm/title": [
         {
-          "command": "atomic.refresh",
+          "command": "atomic.pull",
           "group": "navigation@1",
           "when": "scmProvider == atomic"
         },
         {
-          "command": "atomic.switchView",
+          "command": "atomic.push",
           "group": "navigation@2",
+          "when": "scmProvider == atomic"
+        },
+        {
+          "command": "atomic.refresh",
+          "group": "navigation@3",
+          "when": "scmProvider == atomic"
+        },
+        {
+          "command": "atomic.switchView",
+          "group": "navigation@4",
+          "when": "scmProvider == atomic"
+        },
+        {
+          "command": "atomic.addRemote",
+          "group": "2_configuration@1",
           "when": "scmProvider == atomic"
         }
       ],
@@ -118,6 +163,7 @@
     "check": "tsc --noEmit",
     "compile-tests": "tsc -p tsconfig.test.json",
     "test:unit": "npm run compile-tests && node --test .test-dist/test/*.test.js",
+    "test:live": "npm run compile-tests && node --test .test-dist/test/*.integration.js",
     "test": "npm run check && npm run test:unit",
     "package": "npm run build && vsce package --no-dependencies"
   },
