@@ -1,10 +1,57 @@
 import * as vscode from "vscode";
-import { AtomicRepository, AtomicResourceState, EMPTY_SCHEME, PRISTINE_SCHEME } from "./repository";
+import {
+  cloneRepository,
+  inferCloneFolderName,
+  initializeRepository,
+  validateCloneFolderName,
+} from "./client";
+import {
+  AtomicRepository,
+  AtomicResourceState,
+  EMPTY_SCHEME,
+  formatError,
+  PRISTINE_SCHEME,
+} from "./repository";
 import { StatusEntry } from "./protocol";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const output = vscode.window.createOutputChannel("Atomic", { log: true });
   const repositories = new Map<string, AtomicRepository>();
+
+  const executableFor = (resource?: vscode.Uri): string =>
+    vscode.workspace.getConfiguration("atomic", resource).get<string>("path", "atomic");
+
+  const runSetupOperation = async (
+    title: string,
+    operation: () => Promise<void>,
+  ): Promise<boolean> => {
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title,
+          cancellable: false,
+        },
+        operation,
+      );
+      return true;
+    } catch (error) {
+      const message = formatError(error);
+      output.appendLine(`[setup] ${title} failed: ${message}`);
+      const choice = await vscode.window.showErrorMessage(`Atomic: ${message}`, "Show Output");
+      if (choice === "Show Output") {
+        output.show();
+      }
+      return false;
+    }
+  };
+
+  const offerOpenRepository = async (uri: vscode.Uri, message: string): Promise<void> => {
+    const choice = await vscode.window.showInformationMessage(message, "Open Repository");
+    if (choice === "Open Repository") {
+      await vscode.commands.executeCommand("vscode.openFolder", uri);
+    }
+  };
 
   const removeRepository = (folder: vscode.WorkspaceFolder): void => {
     const repository = repositories.get(folder.uri.toString());
@@ -13,7 +60,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   const addRepository = async (folder: vscode.WorkspaceFolder): Promise<void> => {
-    if (repositories.has(folder.uri.toString()) || folder.uri.scheme !== "file") {
+    const key = folder.uri.toString();
+    if (repositories.has(key) || folder.uri.scheme !== "file") {
       return;
     }
     try {
@@ -21,11 +69,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } catch {
       return;
     }
+    // Initialization can race the root marker watcher. Re-check after the async stat so
+    // only one Source Control provider and one set of filesystem watchers are created.
+    if (repositories.has(key)) {
+      return;
+    }
     const executable = vscode.workspace
       .getConfiguration("atomic", folder.uri)
       .get<string>("path", "atomic");
     repositories.set(
-      folder.uri.toString(),
+      key,
       new AtomicRepository(folder.uri, executable, output),
     );
   };
@@ -103,6 +156,94 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.workspace.registerTextDocumentContentProvider(PRISTINE_SCHEME, pristineProvider),
     vscode.workspace.registerTextDocumentContentProvider(EMPTY_SCHEME, emptyProvider),
+    vscode.commands.registerCommand("atomic.init", async () => {
+      const selection = await vscode.window.showOpenDialog({
+        title: "Select a folder to initialize with Atomic",
+        openLabel: "Initialize Repository",
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+      });
+      const target = selection?.[0];
+      if (!target) {
+        return;
+      }
+      if (target.scheme !== "file") {
+        void vscode.window.showErrorMessage("Atomic can only initialize local folders.");
+        return;
+      }
+
+      const initialized = await runSetupOperation("Atomic: Initializing repository", () =>
+        initializeRepository(executableFor(target), target.fsPath),
+      );
+      if (!initialized) {
+        return;
+      }
+
+      const workspaceFolder = (vscode.workspace.workspaceFolders ?? []).find(
+        (folder) => folder.uri.toString() === target.toString(),
+      );
+      if (workspaceFolder) {
+        await addRepository(workspaceFolder);
+        await repositories.get(workspaceFolder.uri.toString())?.refresh();
+        const choice = await vscode.window.showInformationMessage(
+          "Atomic repository initialized.",
+          "Add Remote",
+        );
+        if (choice === "Add Remote") {
+          await repositories.get(workspaceFolder.uri.toString())?.addDefaultRemote();
+        }
+      } else {
+        await offerOpenRepository(target, "Atomic repository initialized.");
+      }
+    }),
+    vscode.commands.registerCommand("atomic.clone", async () => {
+      const remote = await vscode.window.showInputBox({
+        title: "Clone Atomic Repository",
+        prompt: "Remote repository URL",
+        placeHolder: "https://example.com/workspaces/acme/projects/project/code",
+        ignoreFocusOut: true,
+        validateInput: (value) => (value.trim() ? undefined : "Enter a remote repository URL"),
+      });
+      if (!remote) {
+        return;
+      }
+
+      const selection = await vscode.window.showOpenDialog({
+        title: "Select the parent folder for the cloned repository",
+        openLabel: "Select Destination",
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+      });
+      const parent = selection?.[0];
+      if (!parent) {
+        return;
+      }
+      if (parent.scheme !== "file") {
+        void vscode.window.showErrorMessage("Atomic can only clone into local folders.");
+        return;
+      }
+
+      const folderName = await vscode.window.showInputBox({
+        title: "Clone Atomic Repository",
+        prompt: "Repository folder name",
+        value: inferCloneFolderName(remote),
+        ignoreFocusOut: true,
+        validateInput: validateCloneFolderName,
+      });
+      if (!folderName) {
+        return;
+      }
+
+      const target = vscode.Uri.joinPath(parent, folderName.trim());
+      const cloned = await runSetupOperation("Atomic: Cloning repository", () =>
+        cloneRepository(executableFor(), remote.trim(), target.fsPath),
+      );
+      if (cloned) {
+        await offerOpenRepository(target, "Atomic repository cloned.");
+      }
+    }),
     vscode.commands.registerCommand("atomic.refresh", async (candidate?: unknown) => {
       const repository = resolveRepository(candidate);
       if (repository) {
@@ -130,6 +271,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand("atomic.switchView", async (candidate?: unknown) => {
       await requireRepository(candidate)?.switchView();
+    }),
+    vscode.commands.registerCommand("atomic.pull", async (candidate?: unknown) => {
+      await requireRepository(candidate)?.pull();
+    }),
+    vscode.commands.registerCommand("atomic.push", async (candidate?: unknown) => {
+      await requireRepository(candidate)?.push();
+    }),
+    vscode.commands.registerCommand("atomic.addRemote", async (candidate?: unknown) => {
+      await requireRepository(candidate)?.addDefaultRemote();
     }),
     vscode.commands.registerCommand(
       "atomic.openChange",
