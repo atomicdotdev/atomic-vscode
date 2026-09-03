@@ -54,6 +54,20 @@ export function validateRemoteName(value: string): string | undefined {
   return undefined;
 }
 
+export function redactSensitiveUrls(value: string): string {
+  return value.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (raw) => {
+    try {
+      const url = new URL(raw);
+      const authority = url.username || url.password ? "[redacted]@" : "";
+      const query = url.search ? "?[redacted]" : "";
+      const fragment = url.hash ? "#[redacted]" : "";
+      return `${url.protocol}//${authority}${url.host}${url.pathname}${query}${fragment}`;
+    } catch {
+      return raw;
+    }
+  });
+}
+
 export function isAtomicMetadataPath(relativePath: string): boolean {
   return relativePath === ".atomic" || relativePath.startsWith(".atomic/");
 }
@@ -105,13 +119,23 @@ export async function cloneRepository(
 }
 
 export class AtomicCommandError extends Error {
+  readonly args: readonly string[];
+  readonly stderr: string;
+
   constructor(
-    readonly args: readonly string[],
+    args: readonly string[],
     readonly exitCode: number | null,
-    readonly stderr: string,
+    stderr: string,
   ) {
-    super(stderr.trim() || `atomic ${args.join(" ")} exited with code ${String(exitCode)}`);
+    const safeArgs = args.map(redactSensitiveUrls);
+    const safeStderr = redactSensitiveUrls(stderr);
+    super(
+      safeStderr.trim() ||
+        `atomic ${safeArgs.join(" ")} exited with code ${String(exitCode)}`,
+    );
     this.name = "AtomicCommandError";
+    this.args = safeArgs;
+    this.stderr = safeStderr;
   }
 }
 

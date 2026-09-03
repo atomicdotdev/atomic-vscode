@@ -185,6 +185,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       if (workspaceFolder) {
         await addRepository(workspaceFolder);
+        await repositories.get(workspaceFolder.uri.toString())?.refresh();
         const choice = await vscode.window.showInformationMessage(
           "Atomic repository initialized.",
           "Add Remote",

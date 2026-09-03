@@ -12,6 +12,7 @@ import {
   inferCloneFolderName,
   initializeRepository,
   isAtomicMetadataPath,
+  redactSensitiveUrls,
   shouldRefreshForPath,
   validateCloneFolderName,
   validateRemoteName,
@@ -184,6 +185,23 @@ test("remote names use the same validation rules as the Atomic CLI", () => {
   assert.match(validateRemoteName("origin/team") ?? "", /letters, numbers/);
   assert.match(validateRemoteName("..") ?? "", /letters, numbers/);
   assert.match(validateRemoteName("   ") ?? "", /remote name/);
+});
+
+test("Atomic command errors redact credentials embedded in remote URLs", () => {
+  const url = "https://alice:secret@example.com/project/code?token=top-secret#private";
+  const error = new AtomicCommandError(
+    ["clone", url],
+    4,
+    `Failed to clone ${url}`,
+  );
+
+  assert.equal(
+    redactSensitiveUrls(url),
+    "https://[redacted]@example.com/project/code?[redacted]#[redacted]",
+  );
+  assert.doesNotMatch(error.message, /alice|secret|private/);
+  assert.doesNotMatch(error.args.join(" "), /alice|secret|private/);
+  assert.match(error.message, /\[redacted\]/);
 });
 
 test("AtomicClient invokes pull and push through the repository command queue", async () => {
