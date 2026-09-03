@@ -1,0 +1,131 @@
+{
+  "name": "atomic-vscode",
+  "displayName": "Atomic",
+  "description": "Source Control integration for the Atomic version control system",
+  "version": "0.1.0",
+  "publisher": "atomicdotdev",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/atomicdotdev/atomic-vscode.git"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "keywords": [
+    "atomic",
+    "source control",
+    "scm",
+    "version control"
+  ],
+  "activationEvents": [
+    "workspaceContains:.atomic",
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Atomic executes the locally installed Atomic CLI and writes repository state."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "atomic.refresh",
+        "title": "Refresh",
+        "category": "Atomic",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "atomic.add",
+        "title": "Add",
+        "category": "Atomic"
+      },
+      {
+        "command": "atomic.record",
+        "title": "Record",
+        "category": "Atomic",
+        "icon": "$(check)"
+      },
+      {
+        "command": "atomic.restore",
+        "title": "Restore",
+        "category": "Atomic"
+      },
+      {
+        "command": "atomic.switchView",
+        "title": "Switch View",
+        "category": "Atomic",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "atomic.openChange",
+        "title": "Open Change",
+        "category": "Atomic"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "atomic.refresh",
+          "group": "navigation@1",
+          "when": "scmProvider == atomic"
+        },
+        {
+          "command": "atomic.switchView",
+          "group": "navigation@2",
+          "when": "scmProvider == atomic"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "atomic.add",
+          "group": "inline@1",
+          "when": "scmProvider == atomic && scmResourceState == atomic.untracked"
+        },
+        {
+          "command": "atomic.restore",
+          "group": "inline@2",
+          "when": "scmProvider == atomic && scmResourceState =~ /atomic\\.(modified|deleted|added)/"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Atomic",
+      "properties": {
+        "atomic.path": {
+          "type": "string",
+          "default": "atomic",
+          "scope": "machine",
+          "description": "Path to the Atomic CLI executable."
+        },
+        "atomic.refreshDebounceMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 50,
+          "maximum": 5000,
+          "description": "Delay before refreshing Source Control after file changes."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node20 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "check": "tsc --noEmit",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:unit": "npm run compile-tests && node --test .test-dist/test/*.test.js",
+    "test": "npm run check && npm run test:unit",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "1.100.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
