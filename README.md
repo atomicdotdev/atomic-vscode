@@ -37,6 +37,9 @@ External records and view switches are detected through repository metadata. Aft
 5. Use the pull and push buttons in the Atomic Source Control title bar to synchronize the
    repository's default remote.
 
+If an initialized repository does not have a default remote yet, run **Atomic: Add Default
+Remote** from the Command Palette.
+
 Restoring a file discards its unrecorded tracked changes, so the extension asks for confirmation first.
 Pulling with unrecorded changes also requires confirmation. Remote authentication, identity selection,
 and transport behavior continue to use the Atomic CLI's existing configuration.
